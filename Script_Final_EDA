@@ -1,0 +1,1359 @@
+# EDA - ESDA
+library(tidyverse)
+
+# Geometrías  INEGI ----
+agebs = sf::st_read("01_input/03_agebs.gpkg",quiet=T) %>% 
+  sf::st_transform(crs=4326)
+
+mun = sf::st_read("01_input/02_mun.gpkg",quiet=T) %>% 
+  sf::st_transform(crs=4326)
+
+ent = sf::st_read("01_input/01_ent.gpkg",quiet=T) %>% 
+  sf::st_transform(crs=4326)
+
+# estados = sf::st_read(
+#   "C:/Users/DELL/Desktop/Marco_Geo_2020/889463807469_s/MG_2020_Integrado/conjunto_de_datos/00mun.shp"
+# ) %>% 
+#   sf::st_transform(crs=4326)
+
+# Censo de población y vivienda, Población por AGEB
+# Pob Hom
+# Pob FEM
+# Indice de dependencia Económica 
+
+poblacion = read_delim(
+  "01_input/resageburb_09csv20/RESAGEBURB_09CSV20.csv",
+  delim = ",",
+  col_names = T) %>% 
+  janitor::clean_names() %>% 
+  filter(entidad!="00",
+         mun!="000",
+         loc!="0000",
+         ageb!="0000",
+         mza=="000")
+
+# Se obtiene el indice de dependencia económica 
+p_pob = poblacion %>% 
+  select(1:7,pobtot,pobfem,pobmas,p_0a2,p_3a5,p_6a11,p_12a14,p15a17a,pob0_14,pob15_64,pob65_mas) %>% 
+  mutate(across(c(pobtot:pob65_mas),~as.numeric(.))) %>% 
+  mutate(dependientes = pob0_14+pob65_mas,
+         ide = dependientes/pob15_64) %>% 
+  mutate(cve_ageb=paste0(entidad,mun,loc,ageb))
+
+# IDE, Poblacipon total, Población femenina, 
+p_pob_rango=agebs %>% 
+  left_join(p_pob %>% select(cve_ageb,pobtot,pobfem,ide,pobmas),
+            by = c("cvegeo"="cve_ageb")
+  ) %>% 
+  pivot_longer(cols = c(ide:pobmas),names_to = "pobla",values_to = "valor")
+
+
+## Mapa base
+mapa_base = ggplot()+
+  basemapR::base_map(bbox = sf::st_bbox(ent),
+                     increase_zoom = 3,
+                     nolabels = F,
+                     basemap = "positron")
+
+# # Visualización ....
+rango=sf::st_bbox(ent)
+
+
+mapa_ide = mapa_base+
+  geom_sf(data=p_pob_rango %>%
+            filter(pobla=="ide"),
+          linewidth=.3,aes(fill=valor,
+                           col=valor),
+          alpha=.7)+
+  geom_sf(data=mun,fill=NA,linewidth=.5,color="#525252")+
+  geom_sf(data=ent,fill=NA,color="#252525",linewidth=1)+
+  coord_sf(ylim = c(rango[2],rango[4]),
+           xlim=c(rango[1],rango[3])
+  )+
+  theme_bw()+
+  ggspatial::annotation_scale(
+    location = "tr",
+    bar_cols = c("black", "white"),
+    text_family = "ArcherPro Book"
+  )+
+  ggspatial::annotation_north_arrow(
+    location = "tr", which_north = "true",
+    pad_x = unit(0.4, "in"), pad_y = unit(0.4, "in")
+  )+
+  viridis::scale_color_viridis(discrete = F,option = "viridis",labels=scales::percent)+
+  viridis::scale_fill_viridis(discrete = F,option = "viridis",labels=scales::percent)+
+  facet_wrap(~pobla)+
+  theme_bw()+
+  labs(title = "Indice de Dependencia Económica",
+       subtitle = "Por ageb",
+       caption = "Fuente: INEGI-Censo de Población y vivienda 2020\nElaboración propia:\nMagally Vianey Valencia Ruiz\nDeyani Alejandra Ávila\nNoé Osorio García",
+       fill="IDE",
+       col="IDE")+
+  theme(legend.position = "top",
+        legend.key.size = unit(1.5, 'cm'), #change legend key size
+        legend.key.height = unit(.3, 'cm'), #change legend key height
+        legend.key.width = unit(1, 'cm'), #change legend key width
+        legend.title = element_text(size=14,vjust=1), #change legend title font size
+        legend.text = element_text(size=10,color="black",face = "bold"),
+        strip.text = element_text(size=10,color="black",face = "bold"),
+        strip.background = element_rect(fill="#c6dbef"),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        plot.caption = element_text(hjust = 0,color="black",face = "bold"),
+        plot.title = element_text(color="black",face = "bold",size = 10),
+        plot.subtitle = element_text(color="black",face = "bold",size = 9)
+  )
+
+ggsave("03_output/mapa_1_IDE.png",
+       plot = mapa_ide,
+       width = 10,
+       height = 8,
+       dpi = 300,
+       bg="transparent"
+       )
+
+
+# Distribución del indice 
+# Histograma con fill en función del valor de la variable
+
+distribucion_ide = p_pob_rango %>%
+  filter(pobla=="ide") %>% 
+  as_tibble() %>% 
+  ggplot(aes(x=valor))+
+  geom_histogram(aes(fill=..x..),
+                 color="black")+
+  viridis::scale_fill_viridis(discrete = F,option = "viridis",labels=scales::percent)+
+  scale_x_continuous(expand = c(0,0),labels=scales::percent)+
+  scale_y_continuous(expand = c(0,0),limits = c(0,650))+
+  theme_bw()+
+  labs(title = "Distribucíón del Indice de Dependencia Económica",
+       subtitle = "Por ageb",
+       caption = "Fuente: INEGI-Censo de Población y vivienda 2020\nElaboración propia:\nMagally Vianey Valencia Ruiz\nDeyani Alejandra Ávila\nNoé Osorio García",
+       fill="IDE",
+       col="IDE",
+       y="Cantidad de Agebs",
+       x="Indice de Dependencia Económica")+
+  theme(legend.position = "top",
+        legend.key.size = unit(1.5, 'cm'), #change legend key size
+        legend.key.height = unit(.3, 'cm'), #change legend key height
+        legend.key.width = unit(3, 'cm'), #change legend key width
+        legend.title = element_text(size=14,vjust=1), #change legend title font size
+        legend.text = element_text(size=10,color="black",face = "bold"),
+        strip.text = element_text(size=10,color="black",face = "bold"),
+        strip.background = element_rect(fill="#c6dbef"),
+        axis.text = element_text(color = "black",face = "bold"),
+        axis.title = element_text(color = "black",face = "bold"),
+        plot.caption = element_text(hjust = 0,color="black",face = "bold"),
+        plot.title = element_text(color="black",face = "bold",size = 10),
+        plot.subtitle = element_text(color="black",face = "bold",size = 9)
+  )
+
+#
+ggsave("03_output/plot_1_IDE.png",
+       plot = distribucion_ide,
+       width = 10,
+       height = 8,
+       dpi = 300,
+       bg="transparent"
+)
+
+
+# Autocorrelación espacial.
+matriz = p_pob_rango %>% 
+  filter(pobla=="ide") %>% 
+  select(cvegeo,pobla,valor) %>%
+  mutate(valor=ifelse(is.na(valor),0,valor)) %>% 
+  mutate(nb = sfdep::st_contiguity(geom),
+         wt = sfdep::st_weights(nb)) %>% 
+  st_as_graph()
+
+library(sfnetworks)
+library(sf)
+library(sfdep)
+
+mapa_matriz = mapa_base+
+  geom_sf(data=mun,fill=NA,linewidth=.5,color="#525252")+
+  geom_sf(data=ent,fill=NA,color="black",linewidth=1)+
+  geom_sf(data=matriz %>%  
+            activate("edges") %>%
+            st_as_sf(),fill=NA,linewidth=.1,color="#525252",size=.1)+
+  geom_sf(data=matriz %>%  
+            activate("nodes") %>%
+            st_as_sf(),fill=NA,linewidth=.1,color="#525252",size=.1)+
+  coord_sf(ylim = c(rango[2],rango[4]),
+           xlim=c(rango[1],rango[3])
+  )+
+  theme_bw()+
+  ggspatial::annotation_scale(
+    location = "tr",
+    bar_cols = c("black", "white"),
+    text_family = "ArcherPro Book"
+  )+
+  ggspatial::annotation_north_arrow(
+    location = "tr", which_north = "true",
+    pad_x = unit(0.4, "in"), pad_y = unit(0.4, "in")
+  )+
+  theme_bw()+
+  labs(title = "Matriz de contigúidad tipo reina",
+       subtitle = "Por Ageb",
+       caption = "Fuente: INEGI-Censo de Población y vivienda 2020\nElaboración propia:\nMagally Vianey Valencia Ruiz\nDeyani Alejandra Ávila\nNoé Osorio García",
+       fill="IDE",
+       col="IDE")+
+  theme(legend.position = "top",
+        legend.key.size = unit(1.5, 'cm'), #change legend key size
+        legend.key.height = unit(.3, 'cm'), #change legend key height
+        legend.key.width = unit(1, 'cm'), #change legend key width
+        legend.title = element_text(size=14,vjust=1), #change legend title font size
+        legend.text = element_text(size=10,color="black",face = "bold"),
+        strip.text = element_text(size=10,color="black",face = "bold"),
+        strip.background = element_rect(fill="#c6dbef"),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        plot.caption = element_text(hjust = 0,color="black",face = "bold"),
+        plot.title = element_text(color="black",face = "bold",size = 10),
+        plot.subtitle = element_text(color="black",face = "bold",size = 9)
+  )
+
+
+ggsave("03_output/mapa_2_matriz.png",
+       plot = mapa_matriz,
+       width = 10,
+       height = 8,
+       dpi = 300,
+       bg="transparent"
+)
+
+# Cálculo del rezago espacial.
+
+rezago_ide = p_pob_rango %>% 
+  filter(pobla=="ide") %>% 
+  select(cvegeo,pobla,valor) %>%
+  mutate(valor=ifelse(is.na(valor),0,valor)) %>% 
+  mutate(nb = sfdep::st_contiguity(geom),
+         wt = sfdep::st_weights(nb),
+         ide_lag=sfdep::st_lag(valor,nb,wt))
+
+
+mapa_ide_lag = mapa_base+
+  geom_sf(data=rezago_ide,
+          linewidth=.3,aes(fill=ide_lag,
+                           col=ide_lag),
+          alpha=.7)+
+  geom_sf(data=mun,fill=NA,linewidth=.5,color="#525252")+
+  geom_sf(data=ent,fill=NA,color="#252525",linewidth=1)+
+  coord_sf(ylim = c(rango[2],rango[4]),
+           xlim=c(rango[1],rango[3])
+  )+
+  theme_bw()+
+  ggspatial::annotation_scale(
+    location = "tr",
+    bar_cols = c("black", "white"),
+    text_family = "ArcherPro Book"
+  )+
+  ggspatial::annotation_north_arrow(
+    location = "tr", which_north = "true",
+    pad_x = unit(0.4, "in"), pad_y = unit(0.4, "in")
+  )+
+  viridis::scale_color_viridis(discrete = F,option = "viridis",labels=scales::percent)+
+  viridis::scale_fill_viridis(discrete = F,option = "viridis",labels=scales::percent)+
+  facet_wrap(~pobla)+
+  theme_bw()+
+  labs(title = "Rezago Espacial de Dependencia Económica",
+       subtitle = "Por ageb",
+       caption = "Fuente: INEGI-Censo de Población y vivienda 2020\nElaboración propia:\nMagally Vianey Valencia Ruiz\nDeyani Alejandra Ávila\nNoé Osorio García",
+       fill="IDE",
+       col="IDE")+
+  theme(legend.position = "top",
+        legend.key.size = unit(1.5, 'cm'), #change legend key size
+        legend.key.height = unit(.3, 'cm'), #change legend key height
+        legend.key.width = unit(1, 'cm'), #change legend key width
+        legend.title = element_text(size=14,vjust=1), #change legend title font size
+        legend.text = element_text(size=10,color="black",face = "bold"),
+        strip.text = element_text(size=10,color="black",face = "bold"),
+        strip.background = element_rect(fill="#c6dbef"),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        plot.caption = element_text(hjust = 0,color="black",face = "bold"),
+        plot.title = element_text(color="black",face = "bold",size = 10),
+        plot.subtitle = element_text(color="black",face = "bold",size = 9)
+  )
+
+ggsave("03_output/mapa_1_IDE_lag.png",
+       plot = mapa_ide_lag,
+       width = 10,
+       height = 8,
+       dpi = 300,
+       bg="transparent"
+       )
+
+rezago_ide_cluster = rezago_ide %>%
+  mutate(moran=local_moran(valor,nb = nb,wt = wt)) %>%
+  tidyr::unnest(moran) %>%
+  mutate(pysal = ifelse(p_folded_sim <= 0.1, as.character(pysal), NA)) |>
+  mutate(cluster=case_when(
+    pysal=="Low-High"~"High-Low",
+    .default = pysal))
+
+
+mapa_ide_cluster = mapa_base+
+  geom_sf(data=rezago_ide_cluster,
+          linewidth=.3,aes(fill=cluster,
+                           col=cluster),
+          alpha=.9)+
+  geom_sf(data=mun,fill=NA,linewidth=.5,color="#525252")+
+  geom_sf(data=ent,fill=NA,color="#252525",linewidth=1)+
+  coord_sf(ylim = c(rango[2],rango[4]),
+           xlim=c(rango[1],rango[3])
+  )+
+  theme_bw()+
+  ggspatial::annotation_scale(
+    location = "tr",
+    bar_cols = c("black", "white"),
+    text_family = "ArcherPro Book"
+  )+
+  ggspatial::annotation_north_arrow(
+    location = "tr", which_north = "true",
+    pad_x = unit(0.4, "in"), pad_y = unit(0.4, "in")
+  )+
+  scale_fill_manual(values = c("#B20016","#EACA97","#1C4769"))+
+  scale_color_manual(values = c("#B20016","#EACA97","#1C4769"))+
+  facet_wrap(~pobla)+
+  theme_bw()+
+  labs(title = "Rezago Espacial de Dependencia Económica",
+       subtitle = "Por ageb",
+       caption = "Fuente: INEGI-Censo de Población y vivienda 2020\nElaboración propia:\nMagally Vianey Valencia Ruiz\nDeyani Alejandra Ávila\nNoé Osorio García",
+       fill="IDE",
+       col="IDE")+
+  theme(legend.position = "top",
+        legend.key.size = unit(1.5, 'cm'), #change legend key size
+        legend.key.height = unit(.3, 'cm'), #change legend key height
+        legend.key.width = unit(1, 'cm'), #change legend key width
+        legend.title = element_text(size=14,vjust=1), #change legend title font size
+        legend.text = element_text(size=10,color="black",face = "bold"),
+        strip.text = element_text(size=10,color="black",face = "bold"),
+        strip.background = element_rect(fill="#c6dbef"),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        plot.caption = element_text(hjust = 0,color="black",face = "bold"),
+        plot.title = element_text(color="black",face = "bold",size = 10),
+        plot.subtitle = element_text(color="black",face = "bold",size = 9)
+  )
+
+ggsave("03_output/mapa_1_IDE_cluster.png",
+       plot = mapa_ide_cluster,
+       width = 10,
+       height = 8,
+       dpi = 300,
+       bg="transparent"
+)
+
+
+## DATOS SOBRE EL SUICIDIO. ----
+
+# INEGI 
+inegi = readxl::read_excel(
+  path = "01_input/defunciones_suicidio_INEGI.xlsx",
+  range = c("c6:ar7") 
+)
+
+data_inegi = inegi %>%
+  pivot_longer(cols = c(1:ncol(.)),names_to = "variable",values_to = "valor") %>% 
+  mutate(Year=rep(2010:2023,each=3)) %>% 
+  mutate(genero=case_when(
+    str_detect(variable,"Hombres")~"Hombres",
+    str_detect(variable,"Mujeres")~"Mujeres",
+    .default = "No especificado"
+  )) %>% 
+  group_by(Year) %>% 
+  summarise(total=sum(valor)) %>%
+  mutate(Fuente="INEGI")
+
+# FGJ
+data_fgj = data.table::fread(
+  "https://archivo.datos.cdmx.gob.mx/FGJ/victimas/victimasFGJ_acumulado_2024_07.csv"
+) %>% 
+  filter(str_detect(delito,"SUICIDIO")
+  )
+
+fgj_conteo= data_fgj %>% 
+  group_by(anio_hecho) %>% 
+  summarise(total=n()) %>% 
+  filter(anio_hecho>2018) %>% 
+  mutate(Fuente="FGJ")
+
+# LLAMADAS AL 911 
+links=c(
+  "https://archivo.datos.cdmx.gob.mx/911/llamadas_911_2019_s1.csv",
+  "https://archivo.datos.cdmx.gob.mx/911/llamadas_911_2019_s2.csv",
+  "https://archivo.datos.cdmx.gob.mx/911/llamadas_911_2020_s1.csv",
+  "https://archivo.datos.cdmx.gob.mx/911/llamadas_911_2020_s2.csv",
+  "https://archivo.datos.cdmx.gob.mx/911/llamadas_911_2021_s2.csv",
+  "https://archivo.datos.cdmx.gob.mx/911/llamadas_911_2022_s1.csv"
+)
+
+contenedor = data.frame()
+
+
+for (i in links) {
+  tt = data.table::fread(
+    i
+  )  
+  contenedor =rbind(contenedor,tt)
+  
+}
+
+# Unión de las 3 fuentes 
+suicidio_data = rbind(fgj_conteo %>% 
+        rename(Year=anio_hecho) %>% 
+        filter(Year<2024),
+      data_inegi,
+      contenedor%>% 
+        filter(str_detect(categoria_incidente_c4,"suicidio"),
+               codigo_cierre%in%c("A","Afirmativo")) %>%
+        count(anio_creacion) %>% 
+        rename(Year=anio_creacion,
+               total=n) %>% 
+        mutate(Fuente="Llamadas al 911") %>%
+        as_tibble())
+
+suicidios_serie = suicidio_data%>% 
+  ggplot(aes(Year,total,col=Fuente))+
+  geom_line(
+    linewidth=1
+  )+
+  geom_point(size=3,show.legend = F)+
+  geom_text(
+    data=. %>% 
+      group_by(Fuente) %>% 
+      filter(Year<max(Year)),
+    aes(x=Year,
+        y=total,
+        label=total),
+    show.legend = F,fontface="bold",
+    nudge_y = 30
+  )+
+  geom_text(
+    data=. %>% 
+      group_by(Fuente) %>% 
+      filter(Year==max(Year)),
+    aes(x=2023.3,
+        y=total,
+        label=paste0(Fuente,
+                     "\n",
+                     scales::comma(total))),
+    show.legend = F,fontface="bold"
+  )+
+  scale_x_continuous(expand = c(0,0),limits = c(2009,2024),breaks = seq(from=2009,to=2024,by=1))+
+  scale_y_continuous(expand = c(0,0),limits = c(0,1200),labels=scales::comma)+
+  scale_color_manual(values = c('#1b9e77','#d95f02','#7570b3'))+
+  theme_bw()+
+  labs(title = "Histórico de Suicidios por año, Ciudad de México",
+       subtitle = "INEGI, Llamadas al 911 y Víctimas en carpetas de investigación FGJ",
+       caption = "Fuente\nINEGI. Estadísticas de defunciones registradas por suicidio.\nLLamadas al 911, Periodo 2019-2022, codigo de cierre: 'Afirmativo' (Confirmado por alguna autoridad)\nFGJ: Víctimas Periodo 2018-2023, Tipo de Delito: 'SUICIDIO'\nElaboración propia:\nMagally Vianey Valencia Ruiz\nDeyani Alejandra Ávila\nNoé Osorio García",
+       col="Suicidios")+
+  theme(legend.position = "top",
+        legend.key.size = unit(1.5, 'cm'), #change legend key size
+        legend.key.height = unit(.3, 'cm'), #change legend key height
+        legend.key.width = unit(1, 'cm'), #change legend key width
+        legend.title = element_text(size=14,vjust=1), #change legend title font size
+        legend.text = element_text(size=10,color="black",face = "bold"),
+        strip.text = element_text(size=10,color="black",face = "bold"),
+        strip.background = element_rect(fill="#c6dbef"),
+        axis.text = element_text(size=10,color="black",face = "bold"),
+        axis.ticks = element_blank(),
+        plot.caption = element_text(hjust = 0,color="black",face = "bold"),
+        plot.title = element_text(color="black",face = "bold",size = 10),
+        plot.subtitle = element_text(color="black",face = "bold",size = 9)
+  )
+
+ggsave("03_output/plot_2_serie.png",
+       plot = suicidios_serie,
+       width = 13,
+       height = 10,
+       dpi = 300,
+       bg="transparent"
+)
+
+fgj_serie = fgj %>% 
+  filter(anio_hecho>=2019) %>% 
+  as_tibble() %>% 
+  mutate(mes=lubridate::floor_date(fecha_hecho,
+                                   unit ="month")) %>% 
+  group_by(mes) %>% 
+  count() %>%
+  ungroup() %>% 
+  ggplot(aes(mes,n))+
+  geom_line(linewidth=1,color="#3690c0") + 
+  geom_point(data=. %>% 
+               filter(mes==min(mes)),
+             size=4,
+             color="#023858"
+  )+
+  geom_point(data=. %>% 
+               filter(mes==max(mes)),
+             size=4,
+             color="#023858"
+             )+
+  scale_x_date(date_breaks = "3 month",
+               date_labels = "%b\n%y",
+               limits =as.Date(c("2019-01-01","2024-12-01")),expand = c(0,0) 
+               )+
+  theme_bw()+
+  labs(title = "Histórico de Suicidios mensual CDMX 2019-2024.7",
+       subtitle = "Víctimas en carpetas de investigación FGJ",
+       caption = "Fuente\nFGJ: Víctimas Periodo 2018-2024\nTipo de Delito: 'Perdida de la vida por suicidio, En el metro, Tentativa'\n **Se consideran las tentativas de suicidio, de acuerdo a la metodología descrita en\n'Por mano propia: Estudio sobre las prácticas suicidas, Diana Cohen Agrest'\nElaboración propia:\nMagally Vianey Valencia Ruiz\nDeyani Alejandra Ávila\nNoé Osorio García",
+       col="Suicidios")+
+  theme(legend.position = "top",
+        legend.key.size = unit(1.5, 'cm'), #change legend key size
+        legend.key.height = unit(.3, 'cm'), #change legend key height
+        legend.key.width = unit(1, 'cm'), #change legend key width
+        legend.title = element_text(size=14,vjust=1), #change legend title font size
+        legend.text = element_text(size=10,color="black",face = "bold"),
+        strip.text = element_text(size=10,color="black",face = "bold"),
+        strip.background = element_rect(fill="#c6dbef"),
+        axis.text = element_text(size=10,color="black",face = "bold"),
+        axis.ticks = element_blank(),
+        plot.caption = element_text(hjust = 0,color="black",face = "bold"),
+        plot.title = element_text(color="black",face = "bold",size = 10),
+        plot.subtitle = element_text(color="black",face = "bold",size = 9)
+  )
+
+ggsave("03_output/plot_2_serie_fgj.png",
+       plot = fgj_serie,
+       width = 12,
+       height = 8,
+       dpi = 300,
+       bg="transparent"
+)
+
+serie_acumulada = fgj %>% 
+  filter(anio_hecho>=2019) %>% 
+  as_tibble() %>% 
+  mutate(mes_letra=lubridate::month(fecha_hecho,abbr = T,label=T)) %>% 
+  count(anio_hecho,mes_letra) %>% 
+  group_by(anio_hecho) %>% 
+  mutate(acumulado = cumsum(n)) %>% 
+  mutate(anio_hecho=factor(anio_hecho)) %>% 
+  ungroup() %>% 
+  ggplot(aes(mes_letra,acumulado,group=anio_hecho,color=anio_hecho))+
+  geom_line(linewidth=1)+
+  geom_point(data=. %>% group_by(anio_hecho) %>% 
+               filter(mes_letra==max(mes_letra)),
+             size=3,show.legend = F)+
+  ggrepel::geom_text_repel(
+    data=. %>% filter(mes_letra=="jul",anio_hecho==2024),
+    nudge_x = -.15,
+    box.padding = 0.5,
+    nudge_y = 80,
+    segment.curvature = 0.1,
+    segment.ncp = 3,
+    segment.angle = 20,
+    aes(label=paste0(anio_hecho,": ",acumulado)),
+    show.legend = F,
+    segment.linetype = 5,
+    fontface="bold"
+  )+
+  ggrepel::geom_text_repel(
+    data=. %>% filter(mes_letra=="jul",anio_hecho!=2024),
+    nudge_x = .5,
+    box.padding = 0.5,
+    nudge_y = -150,
+    segment.curvature = 0.1,
+    segment.ncp = 3,
+    segment.angle = 20,
+    aes(label=paste0(anio_hecho,": ",acumulado)),
+    show.legend = F,
+    segment.linetype = 5,
+    fontface="bold"
+  )+
+  ggrepel::geom_text_repel(
+    data=. %>% filter(mes_letra=="dic"),
+    nudge_x = .5,
+    box.padding = 0.5,
+    nudge_y = -50,
+    segment.curvature = -0.1,
+    segment.ncp = 3,
+    segment.angle = 20,
+    segment.linetype = 5,
+    aes(label=paste0(anio_hecho,": ",acumulado)),
+    show.legend = F,
+    fontface="bold"
+  )+
+  theme_bw()+
+  labs(title = "Histórico de Suicidios mensual CDMX 2019-2024.7",
+       subtitle = "Víctimas en carpetas de investigación FGJ",
+       caption = "Fuente\nFGJ: Víctimas Periodo 2018-2024\nTipo de Delito: 'Perdida de la vida por suicidio, En el metro, Tentativa'\n **Se consideran las tentativas de suicidio, de acuerdo a la metodología descrita en\n'Por mano propia: Estudio sobre las prácticas suicidas, Diana Cohen Agrest'\nElaboración propia:\nMagally Vianey Valencia Ruiz\nDeyani Alejandra Ávila\nNoé Osorio García",
+       col="Suicidios",
+       x="Mes",
+       y="Víctimas del suicidio acumluada por mes-año")+
+  scale_color_manual(values = c('#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#a65628'))+
+  theme(legend.position = "top",
+        legend.key.size = unit(1.5, 'cm'), #change legend key size
+        legend.key.height = unit(.3, 'cm'), #change legend key height
+        legend.key.width = unit(1, 'cm'), #change legend key width
+        legend.title = element_text(size=14,vjust=1), #change legend title font size
+        legend.text = element_text(size=10,color="black",face = "bold"),
+        strip.text = element_text(size=10,color="black",face = "bold"),
+        strip.background = element_rect(fill="#c6dbef"),
+        axis.text = element_text(size=10,color="black",face = "bold"),
+        axis.ticks = element_blank(),
+        axis.title = element_text(color="black",face = "bold"),
+        plot.caption = element_text(hjust = 0,color="black",face = "bold"),
+        plot.title = element_text(color="black",face = "bold",size = 10),
+        plot.subtitle = element_text(color="black",face = "bold",size = 9)
+  )+
+  guides(colour = guide_legend(nrow = 1))
+
+ggsave("03_output/plot_2_serie_fgj_acumulada.png",
+       plot = serie_acumulada,
+       width = 13,
+       height = 8,
+       dpi = 300,
+       bg="transparent"
+)
+
+# FGJ puntos de suicidios .....
+
+mapa_suicidios = mapa_base+
+  geom_sf(data=agebs,fill=NA,linewidth=.5,color="grey80",alpha=.3,size=.1)+
+  geom_sf(data=ent,fill=NA,linewidth=1,color="black")+
+  geom_sf(data=fgj %>% 
+            as_tibble() %>% 
+            filter(!is.na(longitud)) %>% 
+            filter(anio_hecho>=2019,anio_hecho<2024) %>% 
+            mutate(anio_hecho=factor(anio_hecho,levels=c("2019",
+                                                         "2020",
+                                                         "2021",
+                                                         "2022",
+                                                         "2023"))) %>% 
+            sf::st_as_sf(coords=c("longitud","latitud"),crs=4326),
+          aes(color=anio_hecho),
+          size=.4,
+          alpha=.8)+
+  scale_color_manual(values = c(
+    '#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00'
+  ))+
+  theme_bw()+
+  ggspatial::annotation_scale(
+    location = "tr",
+    bar_cols = c("black", "white"),
+    text_family = "ArcherPro Book"
+  )+
+  ggspatial::annotation_north_arrow(
+    location = "tr", which_north = "true",
+    pad_x = unit(0.4, "in"), pad_y = unit(0.4, "in")
+  )+
+  theme_bw()+
+  labs(title = "Distribución Geográfica de los Suicidios por Año",
+       subtitle = "Del 2019 al 2023",
+       caption = "Fuente: Víctimas en carpetas de investigación-FGJ\nElaboración propia:\nMagally Vianey Valencia Ruiz\nDeyani Alejandra Ávila\nNoé Osorio García",
+       col="Año")+
+  theme(legend.position = "top",
+        legend.key.size = unit(1.5, 'cm'), #change legend key size
+        legend.key.height = unit(.3, 'cm'), #change legend key height
+        legend.key.width = unit(1, 'cm'), #change legend key width
+        legend.title = element_text(size=14,vjust=1), #change legend title font size
+        legend.text = element_text(size=10,color="black",face = "bold"),
+        strip.text = element_text(size=10,color="black",face = "bold"),
+        strip.background = element_rect(fill="#c6dbef"),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        plot.caption = element_text(hjust = 0,color="black",face = "bold"),
+        plot.title = element_text(color="black",face = "bold",size = 10),
+        plot.subtitle = element_text(color="black",face = "bold",size = 9)
+  )+
+  guides(colour = guide_legend(override.aes = list(size=5)))
+
+
+ggsave("03_output/mapa_suicidios.png",
+       plot = mapa_suicidios,
+       width = 10,
+       height = 8,
+       dpi = 300,
+       bg="transparent"
+)
+
+
+agebs_total = fgj %>% 
+  as_tibble() %>% 
+  filter(!is.na(longitud)) %>% 
+  filter(!is.na(sexo)) %>%
+  filter(anio_hecho>=2019,anio_hecho<2024) %>% 
+  mutate(anio_hecho=factor(anio_hecho,levels=c("2019",
+                                               "2020",
+                                               "2021",
+                                               "2022",
+                                               "2023"))) %>% 
+  sf::st_as_sf(coords=c("longitud","latitud"),crs=4326) %>% 
+  sf::st_join(agebs %>% select(1),join=sf::st_intersects) %>% 
+  as_tibble() %>% 
+  count(cvegeo)
+
+agebs_suicidio_gral = agebs %>% 
+  left_join(agebs_total) %>% 
+  mutate(n=ifelse(is.na(n),0,n))
+
+
+mapa_suicidios_ageb = mapa_base+
+  geom_sf(data=agebs_suicidio_gral,
+          linewidth=.3,aes(fill=n,
+                           col=n),
+          alpha=.9)+
+  geom_sf(data=mun,fill=NA,linewidth=.5,color="#525252")+
+  geom_sf(data=ent,fill=NA,color="#252525",linewidth=1)+
+  coord_sf(ylim = c(rango[2],rango[4]),
+           xlim=c(rango[1],rango[3])
+  )+
+  theme_bw()+
+  ggspatial::annotation_scale(
+    location = "tr",
+    bar_cols = c("black", "white"),
+    text_family = "ArcherPro Book"
+  )+
+  ggspatial::annotation_north_arrow(
+    location = "tr", which_north = "true",
+    pad_x = unit(0.4, "in"), pad_y = unit(0.4, "in")
+  )+
+  viridis::scale_fill_viridis(option = "inferno",discrete = F)+
+  viridis::scale_color_viridis(option = "inferno",discrete = F)+
+  theme_bw()+
+  labs(title = "Suicidios por ageb, del 2019 al 2023",
+       # subtitle = "Por ageb",
+       caption = "Fuente: FGJ 2019-2023\nElaboración propia:\nMagally Vianey Valencia Ruiz\nDeyani Alejandra Ávila\nNoé Osorio García",
+       fill="",
+       col="")+
+  theme(legend.position = "top",
+        legend.key.size = unit(1.5, 'cm'), #change legend key size
+        legend.key.height = unit(.3, 'cm'), #change legend key height
+        legend.key.width = unit(1, 'cm'), #change legend key width
+        legend.title = element_text(size=14,vjust=1), #change legend title font size
+        legend.text = element_text(size=10,color="black",face = "bold"),
+        strip.text = element_text(size=10,color="black",face = "bold"),
+        strip.background = element_rect(fill="#c6dbef"),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        plot.caption = element_text(hjust = 0,color="black",face = "bold"),
+        plot.title = element_text(color="black",face = "bold",size = 10),
+        plot.subtitle = element_text(color="black",face = "bold",size = 9)
+  )
+
+
+ggsave("03_output/mapa_suicidios_ageb.png",
+       plot = mapa_suicidios_ageb,
+       width = 10,
+       height = 8,
+       dpi = 300,
+       bg="transparent"
+)
+
+
+# Suicidios Tiempo 
+
+lista_espacio_tiempo = fgj %>% 
+  as_tibble() %>% 
+  filter(!is.na(longitud)) %>% 
+  filter(!is.na(sexo)) %>%
+  filter(anio_hecho>=2019,anio_hecho<2024) %>% 
+  mutate(anio_hecho=factor(anio_hecho,levels=c("2019",
+                                               "2020",
+                                               "2021",
+                                               "2022",
+                                               "2023"))) %>% 
+  sf::st_as_sf(coords=c("longitud","latitud"),crs=4326) %>% 
+  sf::st_join(agebs %>% select(1),join=sf::st_intersects) 
+
+lista_espacio_tiempo = lista_espacio_tiempo%>% 
+  split(lista_espacio_tiempo$anio_hecho)
+
+
+lista_espacio_tiempo[[1]] %>% 
+  as_tibble() %>% 
+  count(cvegeo) %>% 
+  left_join(agebs,by="cvegeo") %>% 
+  sf::st_as_sf()
+
+
+## Función de Rotación ----
+rotate_data <- function(data, x_add = 0, y_add = 0) {
+  
+  shear_matrix <- function(){ matrix(c(2, 1.2, 0, 1), 2, 2) }
+  
+  rotate_matrix <- function(x){ 
+    matrix(c(cos(x), sin(x), -sin(x), cos(x)), 2, 2) 
+  }
+  data %>% 
+    dplyr::mutate(
+      geometry = .$geometry * shear_matrix() * rotate_matrix(pi/20) + c(x_add, y_add)
+    )
+}
+
+rotate_data_geom <- function(data, x_add = 0, y_add = 0) {
+  shear_matrix <- function(){ matrix(c(2, 1.2, 0, 1), 2, 2) }
+  
+  rotate_matrix <- function(x) { 
+    matrix(c(cos(x), sin(x), -sin(x), cos(x)), 2, 2) 
+  }
+  data %>% 
+    dplyr::mutate(
+      geom = .$geom * shear_matrix() * rotate_matrix(pi/20) + c(x_add, y_add)
+    )
+}
+
+# PArámetros de posición 
+
+x = -169.6
+color = 'red'
+
+
+# Mapa espacio temporal .
+primer_mapa = ggplot()+
+  geom_sf(data=agebs %>% sf::as_Spatial() %>% sf::st_as_sf()%>% rotate_data(y_add = 0),fill=NA,color="grey88",linewidth=.1,alpha=.3,size=.1)+  
+  geom_sf(data=lista_espacio_tiempo[[1]] %>% 
+            as_tibble() %>% 
+            count(cvegeo) %>% 
+            left_join(agebs,by="cvegeo") %>% 
+            sf::st_as_sf() %>% 
+            sf::as_Spatial() %>%
+            sf::st_as_sf()%>% 
+            rotate_data(y_add = 0),
+          aes(fill=n,color=n),
+          alpha=1,show.legend = F,
+          linewidth=.5,inherit.aes = T)+
+  geom_sf(data=mun %>% sf::as_Spatial() %>% sf::st_as_sf()%>% rotate_data(y_add = 0),fill=NA,color="grey38",linewidth=.1,alpha=.3,size=.1)+  
+  geom_sf(data=ent %>% sf::as_Spatial() %>% sf::st_as_sf()%>% rotate_data(y_add = 0),fill=NA,color="grey18",linewidth=.1,alpha=.3,size=.1)
+
+  # theme_void()+
+  # annotate("text", label='Año 2019', x=x, y= 46.7*1.0002, hjust = 0, color=color,size=6.5,fontface = "bold")
+
+primer_mapa
+
+r2 = .4
+r3 = .8
+r4 = 1.2
+r5 = 1.6
+
+
+acomoda_capa = function(valor_r,valor_lista,valor_ggplot){
+  # pop income
+valor_ggplot + 
+  geom_sf(data=agebs %>% sf::as_Spatial() %>% sf::st_as_sf()%>% rotate_data(y_add = valor_r),fill=NA,color="grey88",linewidth=.1,alpha=.3,size=.1)+  
+    geom_sf(data=lista_espacio_tiempo[[valor_lista]] %>% 
+              as_tibble() %>% 
+              count(cvegeo) %>% 
+              left_join(agebs,by="cvegeo") %>% 
+              sf::st_as_sf() %>% 
+              filter(!is.na(geom)) %>%
+              na.omit() %>% 
+              sf::as_Spatial() %>%
+              sf::st_as_sf()%>% 
+              rotate_data(y_add = valor_r),
+            aes(fill=n,color=n),
+            alpha=1,show.legend = F,
+            linewidth=.5,inherit.aes = T)+
+    geom_sf(data=mun %>% sf::as_Spatial() %>% sf::st_as_sf()%>% rotate_data(y_add = valor_r),fill=NA,color="grey38",linewidth=.1,alpha=.3,size=.1)+  
+    geom_sf(data=ent %>% sf::as_Spatial() %>% sf::st_as_sf()%>% rotate_data(y_add = valor_r),fill=NA,color="grey18",linewidth=.1,alpha=.3,size=.1)
+}
+
+## Acá se integran todos ----
+mapa_espacio_temporal = primer_mapa %>% 
+  acomoda_capa(valor_r = r2,valor_lista = 2,valor_ggplot = .) %>%  
+  acomoda_capa(valor_r = r3,valor_lista = 3,valor_ggplot = .) %>% 
+  acomoda_capa(valor_r = r4,valor_lista = 4,valor_ggplot = .) %>% 
+  acomoda_capa(valor_r = r5,valor_lista = 5,valor_ggplot = .)+
+  theme_void()+
+  annotate("text", label='2019', x=x, y= 46.7, hjust = 0, color=color,size=5,fontface = "bold")+
+  annotate("text", label='2020', x=x, y= 47.1, hjust = 0, color=color,size=5,fontface = "bold")+
+  annotate("text", label='2021', x=x, y= 47.5, hjust = 0, color=color,size=5,fontface = "bold")+
+  annotate("text", label='2022', x=x, y= 47.9, hjust = 0, color=color,size=5,fontface = "bold")+
+  annotate("text", label='2023', x=x, y= 48.3, hjust = 0, color=color,size=5,fontface = "bold")+
+  viridis::scale_fill_viridis(option = "inferno",end = .8)+
+  viridis::scale_color_viridis(option = "inferno",end = .8)+
+  labs(title = "Distribución Espacio temporal por ageb de los suicidios, del 2019 al 2023",
+       # subtitle = "Por ageb",
+       caption = "Fuente: FGJ 2019-2023\nElaboración propia:\nMagally Vianey Valencia Ruiz\nDeyani Alejandra Ávila\nNoé Osorio García",
+       fill="",
+       col="")+
+  theme(legend.position = "top",
+        legend.key.size = unit(1.5, 'cm'), #change legend key size
+        legend.key.height = unit(.3, 'cm'), #change legend key height
+        legend.key.width = unit(1, 'cm'), #change legend key width
+        legend.title = element_text(size=14,vjust=1), #change legend title font size
+        legend.text = element_text(size=10,color="black",face = "bold"),
+        strip.text = element_text(size=10,color="black",face = "bold"),
+        strip.background = element_rect(fill="#c6dbef"),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        plot.caption = element_text(hjust = 0,color="black",face = "bold"),
+        plot.title = element_text(color="black",face = "bold",size = 10),
+        plot.subtitle = element_text(color="black",face = "bold",size = 9)
+  )
+
+
+ggsave("03_output/mapa_suicidios_espacio_temp_ageb.svg",
+       plot = mapa_espacio_temporal,
+       width = 10,
+       height = 8,
+       dpi = 300,
+       bg="transparent"
+)
+
+
+# Unidades de Salud ----
+
+# LEctura de salud
+
+archivos = list.files("01_input/clues/",full.names = T) %>% 
+  as_tibble() %>% 
+  mutate(year=substring(value,first = 39,last = 42)) %>% 
+  mutate(year=ifelse(year=="0240",2024,year))
+
+contenedor_2 = data.frame()
+
+for (i in unique(archivos$year)) {
+  #Lectura
+  data_clues = readxl::read_excel(archivos[archivos$year==i,1]$value) %>% 
+    janitor::clean_names() %>%
+    select(clues,nombre_de_la_institucion,clave_de_la_institucion,
+           clave_de_tipologia,nombre_de_tipologia,latitud,longitud) %>% 
+    mutate(Year=i)
+  
+  contenedor_2 = rbind(contenedor_2,data_clues)
+  
+}
+
+grafico_clues = contenedor_2 %>% 
+  mutate(across(c(latitud,longitud),~as.numeric(.))) %>% 
+  filter(if_all(c(latitud, longitud), ~ !is.na(.))) %>% 
+  count(Year) %>%
+  mutate(Year=as.numeric(Year)) %>% 
+  mutate(End=lag(n),
+         xpos=1:n()-0.5,
+         Diff=End-n,
+         Percent=scales::percent(((n-End)/End),accuracy = 1)) %>%
+  mutate(Year=factor(Year)) %>% 
+  ggplot(aes(Year,n))+
+  geom_col(position = "dodge2",aes(fill=n),show.legend = F,alpha=.8,color="gray30")+
+  geom_text(aes(label=scales::comma(n)),vjust=-0.5,fontface="bold")+
+  geom_segment(aes(x=xpos, y = End, xend=xpos, yend=n),color="black",show.legend = F) +
+  geom_text(aes(x=xpos,y =  End-Diff/2, label=Percent),
+            hjust=-0.2,
+            show.legend = F,
+            fontface="bold",color="black")+
+  labs(title = "Histórico de unidades de Salud registrada por año",
+       subtitle = "Catalogo Clues, Nacional",
+       caption = "Fuente: Histórico de bases CLUES Hasta Julio 2024\nElaboración propia:\nMagally Vianey Valencia Ruiz\nDeyani Alejandra Ávila\nNoé Osorio García",
+       fill="",
+       col="",
+       x="Año",y="Unidades ")+
+  theme_bw()+
+  scale_y_continuous(expand = c(0,0),labels =scales::comma,limits = c(0,50000))+
+  viridis::scale_fill_viridis(option = "D",discrete = F)+
+  theme(legend.position = "top",
+        legend.key.size = unit(1.5, 'cm'), #change legend key size
+        legend.key.height = unit(.3, 'cm'), #change legend key height
+        legend.key.width = unit(1, 'cm'), #change legend key width
+        legend.title = element_text(size=14,vjust=1), #change legend title font size
+        legend.text = element_text(size=10,color="black",face = "bold"),
+        strip.text = element_text(size=10,color="black",face = "bold"),
+        strip.background = element_rect(fill="#c6dbef"),
+        axis.text = element_text(color="black",face = "bold"),
+        plot.caption = element_text(hjust = 0,color="black",face = "bold"),
+        plot.title = element_text(color="black",face = "bold",size = 10),
+        plot.subtitle = element_text(color="black",face = "bold",size = 9)
+  )
+
+tipo_mental = contenedor_2[str_detect(contenedor_2$nombre_de_tipologia, "MENTAL|ADICCIONES|PSIQUI|SPIQ"), ] %>% 
+  count(nombre_de_tipologia) %>% 
+  pull(nombre_de_tipologia)
+
+
+nacional_mental = contenedor_2[str_detect(contenedor_2$nombre_de_tipologia, "MENTAL|ADICCIONES|PSIQUI|SPIQ"), ] %>% 
+  count(Year) %>%
+  na.omit() %>%
+  mutate(Year=as.numeric(Year)) %>% 
+  ggplot(aes(Year,n,fill=n))+
+  geom_col(color="gray30",alpha=.8)+
+  labs(title = "Unidades creadas relacionadas a la salud mental",
+       subtitle = "Periodo 2016 al 2024",
+       caption = paste0("Elaboración propia: Magally Valencia, Deyani Vianey, Noé Osorio\nLa tipología de las unidades de salud incluye:\n",
+                        paste0("- ",str_to_title(unique(na.omit(tipo_mental))),collapse = "\n"))
+  )+
+  theme_bw()+
+  scale_y_continuous(expand = c(0,0),labels =scales::comma,limits = c(0,55))+
+  scale_x_continuous(expand = c(0,0),breaks = seq(from=2016,to=2024,by=1))+
+  viridis::scale_fill_viridis(option = "D",discrete = F)+
+  theme(legend.position = "top",
+        legend.key.size = unit(1.5, 'cm'), #change legend key size
+        legend.key.height = unit(.3, 'cm'), #change legend key height
+        legend.key.width = unit(1, 'cm'), #change legend key width
+        legend.title = element_text(size=14,vjust=1), #change legend title font size
+        legend.text = element_text(size=10,color="black",face = "bold"),
+        strip.text = element_text(size=10,color="black",face = "bold"),
+        strip.background = element_rect(fill="#c6dbef"),
+        axis.text = element_text(color="black",face = "bold"),
+        # axis.ticks = element_blank(),
+        plot.caption = element_text(hjust = 0,color="black",face = "bold"),
+        plot.title = element_text(color="black",face = "bold",size = 10),
+        plot.subtitle = element_text(color="black",face = "bold",size = 9)
+  )
+
+
+ggsave("03_output/plot_3_clues_mental.png",
+       plot = nacional_mental,
+       width = 13,
+       height = 10,
+       dpi = 300,
+       bg="transparent"
+)
+
+ggsave("03_output/plot_3_clues.png",
+       plot = grafico_clues,
+       width = 13,
+       height = 10,
+       dpi = 300,
+       bg="transparent"
+)
+
+
+reduce(lista_espacio_tiempo,rbind) %>% 
+  as_tibble() %>% 
+  count(anio_hecho,cvegeo,sort = T) %>% 
+  group_by(anio_hecho) %>%
+  top_n(10) %>%
+  summarise(total=sum(n))
+
+
+reduce(lista_espacio_tiempo,rbind) %>% 
+  as_tibble() %>% 
+  count(anio_hecho,sort = T) %>% 
+  left_join(reduce(lista_espacio_tiempo,rbind) %>% 
+              as_tibble() %>% 
+              count(anio_hecho,cvegeo,sort = T) %>% 
+              group_by(anio_hecho) %>%
+              top_n(10) %>%
+              summarise(total=sum(n)),by="anio_hecho") %>% 
+  mutate(prc=n/total)
+
+reduce(lista_espacio_tiempo,rbind) %>% 
+  as_tibble() %>% 
+  count(anio_hecho,cvegeo,sort = T) %>% 
+  group_by(anio_hecho) %>%
+  top_n(10) %>% 
+  ungroup() %>% 
+  pivot_wider(id_cols = cvegeo,
+              names_from = anio_hecho,
+              values_from = n,
+              names_prefix = "Year_") %>% 
+  mutate(total_gral=rowSums(across(c(Year_2019:Year_2023)),na.rm=T)) %>% 
+  arrange(desc(total_gral))
+
+# Qué porcentaje de los agebs con mayor nivelde dependencia económica están dentro de los 
+# elementos del suicidio? 
+
+
+# Recuperamos ide clusters
+rezago_ide_cluster %>%
+  as_tibble() %>% 
+  select(cvegeo,cluster) %>% 
+  left_join(reduce(lista_espacio_tiempo,rbind) %>% 
+              as_tibble() %>% 
+              count(anio_hecho,cvegeo,sort = T) %>% 
+              pivot_wider(id_cols = cvegeo,
+                          names_from = anio_hecho,
+                          values_from = n,
+                          names_prefix = "Year_") %>% 
+              mutate(total_gral=rowSums(across(c(Year_2019:Year_2023)),na.rm=T)) %>% 
+              arrange(desc(total_gral)),by="cvegeo") %>% 
+  # group_by(cluster) %>% 
+  # summarise(media=mean(total_gral,na.rm=T))
+  ggplot(aes(cluster,total_gral,fill=cluster,col=cluster))+
+  geom_violin(alpha=.5)+
+  geom_jitter(alpha=.7)
+
+
+rezago_ide_cluster %>%
+  as_tibble() %>% 
+  select(cvegeo,cluster) %>% 
+  left_join(reduce(lista_espacio_tiempo,rbind) %>% 
+              as_tibble() %>% 
+              count(anio_hecho,cvegeo,sort = T) %>% 
+              pivot_wider(id_cols = cvegeo,
+                          names_from = anio_hecho,
+                          values_from = n,
+                          names_prefix = "Year_") %>% 
+              mutate(total_gral=rowSums(across(c(Year_2019:Year_2023)),na.rm=T)) %>% 
+              arrange(desc(total_gral)),by="cvegeo") %>% 
+  group_by(cluster) %>% 
+  summarise(promedio=mean(total_gral,na.rm = T),
+            sd=sd(total_gral,na.rm = T)
+            )
+
+  agebs_persistentes = rezago_ide_cluster %>%
+  as_tibble() %>% 
+  select(cvegeo,cluster) %>% 
+  left_join(reduce(lista_espacio_tiempo,rbind) %>% 
+              as_tibble() %>% 
+              count(anio_hecho,cvegeo,sort = T) %>% 
+              pivot_wider(id_cols = cvegeo,
+                          names_from = anio_hecho,
+                          values_from = n,
+                          names_prefix = "Year_") %>% 
+              mutate(total_gral=rowSums(across(c(Year_2019:Year_2023)),na.rm=T)) %>% 
+              arrange(desc(total_gral)),by="cvegeo") %>% 
+  arrange(desc(total_gral)) %>% 
+  mutate(prc=total_gral/sum(total_gral,na.rm=T)) %>% 
+  mutate(prc_acumulado=cumsum(prc)) %>% 
+  filter(prc_acumulado<=.1) %>% 
+  pull(cvegeo)
+
+
+rezago_ide_cluster %>% 
+  ggplot()+
+  geom_sf(aes(fill=cluster))+
+  geom_sf(data=. %>% filter(cvegeo%in%agebs_persistentes),
+          aes(color="Agebs_persistentes",
+              fill="Agebs_persistentes")
+          )
+
+
+mapa_agebs_suicidio = mapa_base+
+  geom_sf(data=rezago_ide_cluster,
+          linewidth=.3,aes(fill=cluster,
+                           col=cluster),
+          alpha=.9)+
+  geom_sf(data=mun,fill=NA,linewidth=.5,color="#525252")+
+  geom_sf(data=ent,fill=NA,color="#252525",linewidth=1)+
+  coord_sf(ylim = c(rango[2],rango[4]),
+           xlim=c(rango[1],rango[3])
+  )+
+  theme_bw()+
+  ggspatial::annotation_scale(
+    location = "tr",
+    bar_cols = c("black", "white"),
+    text_family = "ArcherPro Book"
+  )+
+  ggspatial::annotation_north_arrow(
+    location = "tr", which_north = "true",
+    pad_x = unit(0.4, "in"), pad_y = unit(0.4, "in")
+  )+
+  scale_fill_manual(values = c("#B20016","#EACA97","#1C4769"))+
+  scale_color_manual(values = c("#B20016","#EACA97","#1C4769"))+
+  ggnewscale::new_scale_color()+
+  ggnewscale::new_scale_fill()+
+  geom_sf(data= rezago_ide_cluster %>% filter(cvegeo%in%agebs_persistentes),
+          aes(color="Agebs persistentes",
+              fill="Agebs persistentes")
+  )+
+  geom_sf(data=agebs %>% 
+            filter(cvegeo=="0900700011994"),color="black",fill="red")+
+  scale_color_manual(values = "black")+
+  scale_fill_manual(values="black")+
+  facet_wrap(~pobla)+
+  theme_bw()+
+  labs(title = "Rezago Espacial de Dependencia Económica",
+       subtitle = "Por ageb",
+       caption = "Fuente: INEGI-Censo de Población y vivienda 2020\nElaboración propia:\nMagally Vianey Valencia Ruiz\nDeyani Alejandra Ávila\nNoé Osorio García",
+       fill="IDE",
+       col="IDE")+
+  theme(legend.position = "top",
+        legend.key.size = unit(1.5, 'cm'), #change legend key size
+        legend.key.height = unit(.3, 'cm'), #change legend key height
+        legend.key.width = unit(1, 'cm'), #change legend key width
+        legend.title = element_text(size=14,vjust=1), #change legend title font size
+        legend.text = element_text(size=10,color="black",face = "bold"),
+        strip.text = element_text(size=10,color="black",face = "bold"),
+        strip.background = element_rect(fill="#c6dbef"),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        plot.caption = element_text(hjust = 0,color="black",face = "bold"),
+        plot.title = element_text(color="black",face = "bold",size = 10),
+        plot.subtitle = element_text(color="black",face = "bold",size = 9)
+  )
+
+ggsave("03_output/mapa_1_agebs_suicidio.png",
+       plot = mapa_agebs_suicidio,
+       width = 10,
+       height = 8,
+       dpi = 300,
+       bg="transparent")
+
+
+
+limites_ageb = sf::st_bbox(agebs %>% 
+                             filter(cvegeo=="0900700011994"))
+
+mapa_base+
+  geom_sf(data=rezago_ide_cluster,
+          linewidth=.3,aes(fill=cluster,
+                           col=cluster),
+          alpha=.9)+
+  coord_sf(xlim = c(limites_ageb[3],limites_ageb[1]),
+           ylim = c(limites_ageb[4],limites_ageb[2]))
+  
+
+mapa_agebs_suicidio_zoom = mapa_base+
+  geom_sf(data=rezago_ide_cluster,
+          linewidth=.3,aes(fill=cluster,
+                           col=cluster),
+          alpha=.9)+
+  geom_sf(data=mun,fill=NA,linewidth=.5,color="#525252")+
+  geom_sf(data=ent,fill=NA,color="#252525",linewidth=1)+
+  theme_bw()+
+  ggspatial::annotation_scale(
+    location = "tr",
+    bar_cols = c("black", "white"),
+    text_family = "ArcherPro Book"
+  )+
+  ggspatial::annotation_north_arrow(
+    location = "tr", which_north = "true",
+    pad_x = unit(0.4, "in"), pad_y = unit(0.4, "in")
+  )+
+  scale_fill_manual(values = c("#B20016","#EACA97","#1C4769"))+
+  scale_color_manual(values = c("#B20016","#EACA97","#1C4769"))+
+  ggnewscale::new_scale_color()+
+  ggnewscale::new_scale_fill()+
+  geom_sf(data= rezago_ide_cluster %>% filter(cvegeo%in%agebs_persistentes),
+          aes(color="Agebs persistentes",
+              fill="Agebs persistentes")
+  )+
+  geom_sf(data=agebs %>% 
+            filter(cvegeo=="0900700011994"),color="black",fill="red")+
+  coord_sf(ylim = c(rango[2],rango[4]),
+           xlim=c(rango[1],rango[3])
+  )+
+  scale_color_manual(values = "black")+
+  scale_fill_manual(values="black")+
+  facet_wrap(~pobla)+
+  coord_sf(xlim = c(limites_ageb[1],limites_ageb[3]),
+           ylim = c(limites_ageb[2],limites_ageb[4]))+
+  theme_bw()+
+  labs(title = "Rezago Espacial de Dependencia Económica",
+       subtitle = "Por ageb",
+       caption = "Fuente: INEGI-Censo de Población y vivienda 2020\nElaboración propia:\nMagally Vianey Valencia Ruiz\nDeyani Alejandra Ávila\nNoé Osorio García",
+       fill="IDE",
+       col="IDE")+
+  theme(legend.position = "top",
+        legend.key.size = unit(1.5, 'cm'), #change legend key size
+        legend.key.height = unit(.3, 'cm'), #change legend key height
+        legend.key.width = unit(1, 'cm'), #change legend key width
+        legend.title = element_text(size=14,vjust=1), #change legend title font size
+        legend.text = element_text(size=10,color="black",face = "bold"),
+        strip.text = element_text(size=10,color="black",face = "bold"),
+        strip.background = element_rect(fill="#c6dbef"),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        plot.caption = element_text(hjust = 0,color="black",face = "bold"),
+        plot.title = element_text(color="black",face = "bold",size = 10),
+        plot.subtitle = element_text(color="black",face = "bold",size = 9)
+  )
+
+
+ggsave("03_output/mapa_4_zoom.png",
+       plot = mapa_agebs_suicidio_zoom,
+       width = 10,
+       height = 8,
+       dpi = 300,
+       bg="transparent"
+)
+
+orden_agebs = reduce(lista_espacio_tiempo,rbind) %>% 
+  as_tibble() %>% 
+  count(anio_hecho,cvegeo,sort = T) %>% 
+  filter(cvegeo%in%agebs_persistentes) %>% 
+  group_by(cvegeo) %>% 
+  summarise(total_orden=sum(n,na.rm=T)) %>% 
+  arrange(desc(total_orden)) %>% 
+  mutate(cvegeo=factor(cvegeo))
+
+reduce(lista_espacio_tiempo,rbind) %>% 
+  as_tibble() %>% 
+  count(anio_hecho,cvegeo,sort = T) %>% 
+  filter(cvegeo%in%agebs_persistentes) %>%
+  mutate(cvegeo=factor(cvegeo,levels=orden_agebs$cvegeo)) %>% 
+  ggplot(aes(anio_hecho,n))+
+  geom_col()+
+  facet_wrap(~cvegeo)+
+  theme_bw()
+
+
+library(leaflet)
+
+
+leaflet() %>% 
+  addProviderTiles(providers$OpenStreetMap) %>% 
+  addPolygons(data=agebs %>% 
+  filter(cvegeo=="0900700011994"),weight = 3,color = "red",fill=NA,opacity = 1) %>% 
+  leaflet.extras::addHeatmap(data=fgj %>% 
+                               select(longitud,latitud,delito) %>% 
+                               as_tibble() %>% 
+                               filter(!is.na(longitud)) %>% 
+                               sf::st_as_sf(coords=c("longitud","latitud"),crs=4326) %>% 
+                               sf::st_join(agebs %>% 
+                                             filter(cvegeo=="0900700011994"),join=sf::st_intersects) %>% 
+                               filter(!is.na(cvegeo)))
+
+
+salud_año_ageb = contenedor_2 %>% 
+  mutate(across(c("latitud","longitud"),~as.numeric(.))) %>%
+  select(longitud,latitud,everything()) %>%
+  filter(!is.na(longitud)) %>%
+  filter(!is.na(latitud)) %>%
+  sf::st_as_sf(coords=c("longitud","latitud"),crs=4326) %>% 
+  sf::st_join(agebs,join=sf::st_intersects) %>% 
+  filter(!is.na(cvegeo)) %>% 
+  as_tibble() %>% 
+  count(Year,cvegeo)
+
+salud_año_ageb %>% 
+  mutate(Year=as.integer(Year)) %>%
+  rename(valor_clue=n) %>% 
+  left_join(suicidios_año_ageb %>% 
+              rename(valor_vict=n),
+            by=c("Year"="anio_hecho","cvegeo")) %>% 
+  filter(Year>=2019) %>% 
+  mutate(valor_vict=ifelse(is.na(valor_vict),0,valor_vict)) %>%
+  filter(valor_vict>0) %>% 
+  ggplot(aes(valor_clue,valor_vict))+
+  geom_point()+
+  facet_wrap(~Year)
+
+
+
+salud_año_ageb %>% 
+  mutate(Year=as.integer(Year)) %>%
+  rename(valor_clue=n) %>% 
+  left_join(suicidios_año_ageb %>% 
+              rename(valor_vict=n),
+            by=c("Year"="anio_hecho","cvegeo")) %>% 
+  filter(Year>=2019) %>% 
+  mutate(valor_vict=ifelse(is.na(valor_vict),0,valor_vict)) %>%
+  filter(valor_vict>0) %>% 
+  group_by(Year) %>% 
+  summarise(correlacion=cor(valor_clue,valor_vict))
+
+salud_año_ageb %>% 
+  mutate(Year=as.integer(Year)) %>%
+  rename(valor_clue=n) %>% 
+  left_join(suicidios_año_ageb %>% 
+              rename(valor_vict=n),
+            by=c("Year"="anio_hecho","cvegeo")) %>% 
+  filter(Year>=2019) %>% 
+  mutate(valor_vict=ifelse(is.na(valor_vict),0,valor_vict)) %>%
+  filter(valor_vict>0) %>%
+  mutate(alcaldia=substring(cvegeo,3,5)) %>% 
+  group_by(Year,alcaldia) %>% 
+  summarise(valor_cor=cor(valor_clue,valor_vict)) %>% 
+  ungroup() %>% 
+  pivot_wider(id_cols = alcaldia,names_from = Year,values_from = valor_cor)
+
+
+unidades_cdmx = contenedor_2 %>% 
+  mutate(across(c("latitud","longitud"),~as.numeric(.))) %>%
+  select(longitud,latitud,everything()) %>%
+  filter(!is.na(longitud)) %>%
+  filter(!is.na(latitud)) %>%
+  sf::st_as_sf(coords=c("longitud","latitud"),crs=4326) %>% 
+  sf::st_join(agebs,join=sf::st_intersects) %>% 
+  filter(!is.na(cvegeo))
+
+sf::st_write(unidades_cdmx,"03_output/unidades_cdmx.gpkg")
